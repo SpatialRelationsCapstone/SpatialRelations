@@ -63,15 +63,19 @@ class DQN(object):
 
         # build graph
         with tf.variable_scope(var_scope):
-            self._build()
+            self._build_forward()
             self._build_optimization()
 
     def load(self, sess):
         """Restore from ckpt."""
         self.saver.restore(sess, self.save_path)
 
-    def _build(self):
-        """Construct tensorflow graph."""
+    def save_model(self, sess):
+        """Write tensorflow ckpt."""
+        self.saver.save(sess, self.save_path)
+
+    def _build_forward(self):
+        """Construct tensorflow graph for forward pass (outputs Q values)."""
         self.state_features = tf.concat(
             values=[self.image_feats,
                     self.subject_feats,
@@ -241,6 +245,14 @@ class VRL(object):
             self.sess.run(tf.global_variables_initializer())
 
         self._update_target_network()
+
+    def select_actions(self):
+        """Select a triplet of actions using an epsilon-greedy strategy."""
+        raise NotImplementedError  # TODO: implement
+
+    def train_network(self):
+        """Sample a minibatch, calculate returns, and train online network."""
+        raise NotImplementedError  # TODO: implement
 
     def _update_target_network(self):
         online_vars = tf.get_collection(
