@@ -5,9 +5,13 @@
 - Host the dist folder as an HTTP server to avoid CORS errors. Something like `.../SpatialRelations/deploy/dist/$ python -m http.server`.
 
 ### TODO
+- [ ] Comment code
+- [ ] Clean up code
 - [ ] Make nodes squares with text
 - [ ] Add attribute nodes
 - [ ] Make predicates into nodes
 - [ ] Add mouseover highlight to show relation between image and graph objects
+- [ ] Ability to choose and upload image
+- [ ] Add animation if model output is asynchronous
 - [ ] Make lines curvy?
 - [ ] Everything else...
