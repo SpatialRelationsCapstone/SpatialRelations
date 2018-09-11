@@ -1,8 +1,8 @@
 {
-  "name": "SceneGraphVisualization",
+  "name": "SpatialRelationVisualization",
   "version": "1.0.0",
-  "main": "index.js",
-  "author": "JasperJenkins",
+  "main": "src.js",
+  "author": "SpatialRelations",
   "license": "MIT",
   "dependencies": {
     "@tensorflow/tfjs": "^0.12.7",
