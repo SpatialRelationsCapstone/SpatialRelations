@@ -13,7 +13,7 @@
     "webpack-command": "^0.4.1"
   },
   "scripts": {
-    "build": "webpack ./src/src.js -o ./dist/bundle.js --mode=development",
-    "deploy": "webpack ./src/src.js -o ./dist/bundle.js --mode=production"
+    "develop": "webpack ./src/src.js -o ./dist/bundle.js --mode=development --watch",
+    "build": "webpack ./src/src.js -o ./dist/bundle.js --mode=production"
   }
 }
