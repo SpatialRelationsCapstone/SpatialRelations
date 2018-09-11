@@ -1,0 +1,40 @@
+:root {
+    --radius: 4px;
+    --color: rgb(245, 147, 0);
+}
+
+.bbox {
+    fill: none;
+    stroke-width: 2px;
+    rx: var(--radius);
+    ry: var(--radius);
+}
+
+.connection {
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke: var(--color);
+}
+
+.subject {
+    stroke: var(--color);
+}
+
+.object {
+    stroke: var(--color);
+}
+
+.node {
+    r: 5px;
+    fill: var(--color);
+}
+
+.link {
+    stroke: black;
+    stroke-width: 3px;
+    stroke-linecap: round;
+}
+
+#image-container img, #image-container svg {
+    position: absolute;
+}

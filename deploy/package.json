@@ -1,0 +1,19 @@
+{
+  "name": "SceneGraphVisualization",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "JasperJenkins",
+  "license": "MIT",
+  "dependencies": {
+    "@tensorflow/tfjs": "^0.12.7",
+    "d3": "^5.7.0"
+  },
+  "devDependencies": {
+    "webpack": "^4.17.2",
+    "webpack-command": "^0.4.1"
+  },
+  "scripts": {
+    "build": "webpack ./src/src.js -o ./dist/bundle.js --mode=development",
+    "deploy": "webpack ./src/src.js -o ./dist/bundle.js --mode=production"
+  }
+}
