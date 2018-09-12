@@ -44,3 +44,7 @@ class FasterRCNN(object):
     def train(self):
         """4-step training algorithm to learn shared features."""
         raise NotImplementedError  # TODO
+
+    def non_max_suppression(self):
+        """Reduce number of regions output by RPN to be fed into detector."""
+        raise NotImplementedError  # TODO
