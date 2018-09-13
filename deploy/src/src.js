@@ -3,10 +3,10 @@ import * as tf from '@tensorflow/tfjs';
 
 // Globally available and useful variables.
 let objects, predicates, annotations, model;
-let nodes_data, links_data;
-let image_canvas, image_height, image_width;
-let graph_canvas, graph_simulation, graph_nodes, graph_links;
-// TODO Change these to be read from html/css
+let svg_canvas, image_canvas, graph_canvas;
+let [nodes_data, links_data] = [[], []];
+let image_height, image_width;
+let graph_simulation, graph_nodes, graph_links;
 const [graph_width, graph_height] = [350, 350];
 const margin = 10;
 
@@ -30,28 +30,54 @@ function allLoaded(promises) {
     createCanvases();
     drawBoxes();
     drawConnections();
+    createGraph();
 }
 
-// Turn the annotations into 
+// Turn the annotations json into two lists, nodes and links.
+// Links are two indexes into the node list and a type for css styling.
+// Nodes are text labels and a type for css styling.
+// This setup makes adding attribute later trivial.
 function processData() {
-    nodes_data = [];
-    links_data = annotations.map(annotation => ({
-        source: addNodeAndReturnIndex(annotation.object),
-        target: addNodeAndReturnIndex(annotation.subject),
-        label: predicates[annotation.predicate],
-    }));
+    for (const annotation of annotations) {
+        // Bounding boxes could already exist, so this function handles that.
+        const object_index = addNodeAndGetIndex(annotation.object);
+        const subject_index = addNodeAndGetIndex(annotation.subject);
+        const predicate_index = nodes_data.length;
+        // Predicate nodes are always unique, so index is just the length of the list
+        nodes_data.push({
+            label: predicates[annotation.predicate],
+            type: 'predicate'
+        });
+
+        // Add links.
+        links_data.push({
+            source: object_index,
+            target: subject_index,
+            type: 'bbox',
+        }, {
+            source: object_index,
+            target: predicate_index,
+            type: 'predicate',
+        }, {
+            source: predicate_index,
+            target: subject_index,
+            type: 'predicate',
+        });
+    }
 }
 
-function addNodeAndReturnIndex(subject_object) {
+function addNodeAndGetIndex(subject_object) {
     // Turn the BBox into strings to use as keys to avoid duplicate object nodes.
     // This should not be needed when annoations are generated.
     const bbox_key = subject_object.bbox.join('<~>');
-    let node_index = nodes_data.findIndex(node => node.bbox.join('<~>') == bbox_key);
+    let node_index = nodes_data.findIndex(node => {
+        return node.bbox ? node.bbox.join('<~>') === bbox_key : false;
+    });
     if (node_index === -1) {
         node_index = nodes_data.length;
         nodes_data.push({
             label: objects[subject_object.category],
-            // Attributes added here.
+            type: 'object',
             ...makeBBoxNice(subject_object.bbox),
         })
     }
@@ -72,134 +98,169 @@ function makeBBoxNice(bbox) {
     };
 }
 
-// Creates an real encompassing svg canvas and two groups that act as their own canvases.
+// Creates a real encompassing svg canvas and two groups that act as their own canvases.
 // Do all the ugly double canvas with margins math here to not do it elsewhere.
 function createCanvases() {
     const img_container = d3.select('#image-container');
     const img = img_container.select('img').node();
     [image_height, image_width] = [img.naturalHeight, img.naturalWidth];
     // Create a real svg canvas that is large enough for the image + graph + margins/
-    const canvas = img_container.append('svg')
-        .attr('transform', `translate(${-margin}, ${-margin})`)
-        .attr('height', margin * 2 + image_height + graph_height)
+    svg_canvas = img_container.append('svg')
+        .attr('transform', translate(-margin, -margin))
+        .attr('height', margin * 2 + Math.max(image_height, graph_height))
         .attr('width', margin * 3 + image_width + graph_width)
     // Create the two fake canvases.
-    image_canvas = canvas.append('g')
-        .attr('transform', `translate(${margin}, ${margin})`);
-    graph_canvas = canvas.append('g')
-        .attr('transform', `translate(${margin * 2 + image_width}, ${margin})`);
+    image_canvas = svg_canvas.append('g')
+        .attr('transform', translate(margin, margin));
+    graph_canvas = svg_canvas.append('g')
+        .attr('transform', translate(margin * 2 + image_width, margin));
 }
 
+// Draw bounding boxes over the image.
 function drawBoxes() {
     image_canvas.selectAll('rect')
-        .data(nodes_data)
+        .data(nodes_data.filter(d => d.type === 'object'))
         .enter().append('rect')
-            .attr('class', 'bbox')
-            .attr('x', d => d.left)
-            .attr('y', d => d.up)
-            .attr('width', d => d.right - d.left)
-            .attr('height', d => d.down - d.up);
+        .attr('class', 'bbox')
+        .attr('x', d => d.left)
+        .attr('y', d => d.up)
+        .attr('width', d => d.right - d.left)
+        .attr('height', d => d.down - d.up);
 }
 
+// Draw a line between closest corners of bounding boxes with predicate connections.
 function drawConnections() {
     image_canvas.selectAll('line')
-        .data(links_data)
+        .data(links_data.filter(d => d.type === 'bbox'))
         .enter().append('line').each((d, i, nodes) => {
-            const [object_corner, subject_corner] = closestPointPair(
+            // Arrow functions override "this",
+            // so (d, i, nodes) => d3.select(nodes[i]) syntax is required
+            const [corner_a, corner_b] = closestPointPair(
                 nodes_data[d.source],
                 nodes_data[d.target],
                 true,
             );
-            // Arrow functions don't play nice with selection.each().
             d3.select(nodes[i])
                 .attr('class', 'connection')
-                .attr('x1', object_corner.x)
-                .attr('y1', object_corner.y)
-                .attr('x2', subject_corner.x)
-                .attr('y2', subject_corner.y);
+                .attr('x1', corner_a.x)
+                .attr('y1', corner_a.y)
+                .attr('x2', corner_b.x)
+                .attr('y2', corner_b.y);
         });
 }
 
-function closestPointPair(lhs_node, rhs_node, offset_radius) {
-    // Calculate smallest distance between each bbox's four corners.
+// Calculate smallest distance between each bbox's four corners.
+function closestPointPair(node_a, node_b, offset_radius) {
     const corner_keys = ['up_left', 'up_right', 'down_left', 'down_right'];
     let min_distance = Infinity;
-    let min_lhs_key, min_rhs_key;
-    for (const lhs_key of corner_keys) {
-        for (const rhs_key of corner_keys) {
-            const distance = euclidianDistance(lhs_node[lhs_key], rhs_node[rhs_key]);
+    let min_key_a, min_key_b;
+    for (const key_a of corner_keys) {
+        for (const key_b of corner_keys) {
+            const distance = euclidianDistance(node_a[key_a], node_b[key_b]);
             if (distance <= min_distance) {
-                [min_distance, min_lhs_key, min_rhs_key] = [distance, lhs_key, rhs_key];
+                [min_distance, min_key_a, min_key_b] = [distance, key_a, key_b];
             }
         }
     }
     // Split the keys into axes to apply the direction's respective radius offsets.
-    const [lhs_y, lhs_x] = min_lhs_key.split('_');
-    const [rhs_y, rhs_x] = min_rhs_key.split('_');
+    const [y_key_a, x_key_a] = min_key_a.split('_');
+    const [y_key_b, x_key_b] = min_key_b.split('_');
     let radius = 0;
     if (offset_radius) {
         // Grab the radius offset from the css sheet.
         const style = document.styleSheets[0].cssRules[0].style;
         radius = parseFloat(style.getPropertyValue('--radius')) / 2;
     }
-    const offsets = {left: radius, right: -radius, up: radius, down: -radius};
+    const offset = {left: radius, right: -radius, up: radius, down: -radius};
     // Return two point objects.
     return [
-        {
-            x: lhs_node[lhs_x] + offsets[lhs_x],
-            y: lhs_node[lhs_y] + offsets[lhs_y],
-        }, {
-            x: rhs_node[rhs_x] + offsets[rhs_x],
-            y: rhs_node[rhs_y] + offsets[rhs_y],
-        },
+        {x: node_a[x_key_a] + offset[x_key_a], y: node_a[y_key_a] + offset[y_key_a]},
+        {x: node_b[x_key_b] + offset[x_key_b], y: node_b[y_key_b] + offset[y_key_b]},
     ];
 }
 
-function euclidianDistance(point_a, point_b) {
-    const x_squared = Math.pow(point_a.x - point_b.x, 2);
-    const y_squared = Math.pow(point_a.y - point_b.y, 2);
-    return Math.sqrt(x_squared + y_squared);
+function createGraph() {
+    const bbox_filtered_links_data = links_data.filter(d => d.type !== 'bbox');
+    // Create the graph simulation add nodes and links and center force to the fake canvas.
+    graph_simulation = d3.forceSimulation(nodes_data)
+        .force('link', d3.forceLink(bbox_filtered_links_data).distance(40))
+        .force('charge', d3.forceManyBody().distanceMax(80).strength(-75))
+        .force('center', d3.forceCenter(graph_width / 2, graph_height / 2))
+        .on('tick', updateGraph);
+
+    // Add a group for each node and links. Add the respective class.
+    graph_links = graph_canvas.append('g').selectAll('g')
+        .data(bbox_filtered_links_data)
+        .enter().append('g')
+            .attr('class', d => 'link ' + d.type);
+
+    graph_nodes = graph_canvas.append('g').selectAll('g')
+        .data(nodes_data)
+        .enter().append('g')
+            .attr('class', d => 'node ' + d.type);
+
+    // Add lines for links with parameters inherited from the css.
+    graph_links.append('line');
+
+    // Calculates points for an arrow and converts to html compatible string.
+    const arrow = {
+        width: 6,
+        length: 10,
+        offset: 2.5,
+    };
+    const arrow_points = [
+        [-arrow.width / 2, -arrow.length - arrow.offset],
+        [0, -arrow.offset],
+        [arrow.width / 2, -arrow.length - arrow.offset],
+    ].map(p => p.join(',')).join(' ');
+
+    // Add an arrow for each of the links.
+    graph_links.append('polygon')
+        .attr('points', arrow_points);
+
+    // Add nodes visuals second because there is no explicit draw order in svg
+    graph_nodes.append('circle');
+    graph_nodes.append("text")
+        .attr("x", 8)
+        .attr("y", ".25em")
+        .text(d => d.label);
 }
 
-function createSimulation() {
-    nodes = d3.map()
-    for (const annotation of annotations) {
-        nodes.set(annotation.object.bbox.join('-'), annotation.object.label);
-        nodes.set(annotation.subject.bbox.join('-'), annotation.subject.label);
-    }
-    nodes = nodes.entries().map(x => ({id: x.key, label: x.value}))
-    links = annotations.map(annotation => ({
-        source: annotation.object.bbox.join('-'),
-        target: annotation.subject.bbox.join('-'),
-        label: annotation.label,
-    }))
-
-    simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink().distance(40).id(d => d.id))
-        .force('charge', d3.forceManyBody().distanceMax(125).strength(-50))
-        .force('center', d3.forceCenter(simulation_width / 2, simulation_height / 2))
-        .on('tick', tickSimulation);
-
-    simulation.force('link').links(links);
-
-    links = simulation_canvas.selectAll('line')
-        .data(links)
-        .enter().append('line')
-            .attr('class', 'link')
-
-    nodes = simulation_canvas.selectAll('circle')
-        .data(nodes)
-        .enter().append('circle')
-            .attr('class', 'node')
-}
-
-function tickSimulation() {
-    links
+// Update the view of the graph from updated simulation locations.
+function updateGraph() {
+    graph_links.selectAll('line')
         .attr('x1', d => d.source.x)
         .attr('y1', d => d.source.y)
         .attr('x2', d => d.target.x)
         .attr('y2', d => d.target.y);
-    nodes
+
+    // Translate the arrow to the target location and calculate proper angle with trig.
+    graph_links.selectAll('polygon')
+        .attr('transform', d => ([
+            translate(d.source.x, d.source.y),
+            rotate(degreesToPoint(d.target, d.source)),
+        ].join(' ')));
+
+    graph_nodes.selectAll('circle')
         .attr('cx', d => d.x)
         .attr('cy', d => d.y);
+
+    graph_nodes.selectAll('text')
+        .attr('transform', d => translate(d.x, d.y))
+}
+
+function translate(x, y) {
+    return 'translate(' + x + ', ' + y + ')';
+}
+
+function rotate(degrees) {
+    return 'rotate(' + degrees + ', 0, 0)'
+}
+
+function degreesToPoint(a, b) {
+    return Math.atan2(a.y - b.y, a.x - b.x) * (180 / Math.PI) + 90;
+}
+
+function euclidianDistance(a, b) {
+    return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
 }
