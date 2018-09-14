@@ -6,7 +6,7 @@ import tensorflow as tf
 class ZFNet(object):
     """8 layer convnet model that accepts variable input size."""
 
-    def __init__(self, var_scope):
+    def __init__(self, var_scope="ZFNet"):
         """Set hyperparameters and build graph."""
         with tf.variable_scope(var_scope):
             self._build_forward()

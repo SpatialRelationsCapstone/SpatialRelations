@@ -20,6 +20,7 @@ class RPN(object):
         self.input_layer = input_layer
         with tf.variable_scope(var_scope):
             self._build_forward()
+            self._build_optimization()
 
     def _build_forward(self):
         self.mini_network = tf.layers.conv2d(
@@ -71,6 +72,10 @@ class RPN(object):
 
         self.final_proposals = []
 
+    def _build_optimization(self):
+        # TODO: multi-task loss similar to Fast-RCNN, anchor-indexed
+        pass
+
 
 class RCNNDetector(object):
     """Bounding box regressor and object classifier taking regions as input."""
@@ -82,6 +87,7 @@ class RCNNDetector(object):
         self.regions = regions
         with tf.variable_scope(var_scope):
             self._build_forward()
+            self._build_optimization()
 
     def _build_forward(self):
         self.roi_pooling = []  # TODO
@@ -111,6 +117,10 @@ class RCNNDetector(object):
             activation=None,
             name="regressor")
 
+    def _build_optimization(self):
+        # TODO: multi-task loss - classification loss + bbox regression loss
+        pass
+
 
 class FasterRCNN(object):
     """End-to-end region proposal and object classification/localization."""
@@ -127,8 +137,11 @@ class FasterRCNN(object):
 
     def train(self):
         """4-step training algorithm to learn shared features."""
-        raise NotImplementedError  # TODO
+        # TODO: initialize CNN and RPN weights, train
 
-    def non_max_suppression(self):
-        """Reduce number of regions output by RPN to be fed into detector."""
-        raise NotImplementedError  # TODO
+        # TODO: initialize new CNN and Detector weights, train
+
+        # TODO: copy trained detector weights and freeze them, fine-tune RPN
+
+        # TODO: CNN weights remain frozen, fine-tune Detector
+        pass
