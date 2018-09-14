@@ -10,9 +10,9 @@ class RPN(object):
 
     def __init__(self,
                  input_layer,
-                 var_scope,
                  feature_dim=256,
-                 proposals_per_region=9):
+                 proposals_per_region=9,
+                 var_scope="RPN"):
         """Set hyperparameters and build graph."""
         self.feature_dim = feature_dim
         self.proposals_per_region = proposals_per_region
@@ -35,12 +35,12 @@ class RPN(object):
             name="feature")
 
         # anchor-based region proposals
-        self.regressor = tf.layers.conv2d(
+        self.region_regressor = tf.layers.conv2d(
             self.feature,
             filters=self.proposals_per_region * 4,
             kernel_size=[1, 1],
             strides=[1, 1],
-            name="regressor")
+            name="region_regressor")
 
         # object vs background classifier
         self.classifier = tf.layers.conv2d(
@@ -50,30 +50,80 @@ class RPN(object):
             strides=[1, 1],
             name="classifier")
 
+        self.cls_reshaped = tf.reshape(
+            self.classifier,
+            shape=[*tf.shape(self.classifier)[0:3], -1, 2],
+            name="cls_reshaped")
+
+        self.cls_softmax = tf.nn.softmax(
+            self.cls_reshaped,
+            axis=-1,
+            name="cls_softmax")
+
+        self.cls_output = tf.reshape(
+            self.cls_softmax,
+            shape=[*tf.shape(self.classifier)],
+            name="cls_output")
+
+        # TODO: gather proposals with a high enough object score
+
+        # TODO: non-maximum suppression
+
+        self.final_proposals = []
+
 
 class RCNNDetector(object):
     """Bounding box regressor and object classifier taking regions as input."""
 
-    def __init__(self, var_scope):
+    def __init__(self, n_categories, regions, var_scope="Detector"):
         """Set hyperparameters and build graph."""
+        self.n_categories = n_categories
+
+        self.regions = regions
         with tf.variable_scope(var_scope):
             self._build_forward()
 
     def _build_forward(self):
-        raise NotImplementedError  # TODO
+        self.roi_pooling = []  # TODO
+
+        self.fc1 = tf.layers.dense(
+            self.roi_pooling,
+            units=4096,
+            activation=tf.nn.relu,
+            name="fc1")
+
+        self.fc2 = tf.layers.dense(  # also used as one of the inputs to VRL
+            self.fc1,
+            units=4096,
+            activation=tf.nn.relu,
+            name="fc2")
+
+        # output layers
+        self.category_classifier = tf.layers.dense(
+            self.fc2,
+            units=self.n_categories,
+            activation=tf.nn.softmax,
+            name="category_classifier")
+
+        self.regressor = tf.layers.dense(
+            self.fc2,
+            units=self.n_categories * 4,
+            activation=None,
+            name="regressor")
 
 
 class FasterRCNN(object):
     """End-to-end region proposal and object classification/localization."""
 
     def __init__(self,
+                 n_categories,
                  conv_net=zf.ZFNet,
                  rpn=RPN,
                  detector=RCNNDetector):
         """Initialize instances of the constituent modules."""
-        self.conv_net = conv_net("ZFNet")
-        self.rpn = rpn(self.conv_net.conv_output, "RPN")
-        self.detector = detector("Detector")
+        self.conv_net = conv_net()
+        self.rpn = rpn(self.conv_net.conv_output)
+        self.detector = detector(n_categories, self.rpn.final_proposals)
 
     def train(self):
         """4-step training algorithm to learn shared features."""

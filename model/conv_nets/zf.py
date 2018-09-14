@@ -95,17 +95,3 @@ class ZFNet(object):
         self.conv_output = tf.nn.relu(
             self.conv5,
             name="conv_output")
-
-        # additional feature layers (when pretrained, used as input to VRL)
-        self.pool5 = tf.nn.max_pool(
-            self.conv_output,
-            ksize=[1, 3, 3, 1],
-            strides=[1, 2, 2, 1],
-            padding="SAME",
-            name="pool5")
-
-        self.image_feature_output = tf.layers.dense(
-            self.pool5,
-            units=4096,
-            activation=tf.nn.relu,
-            name="image_feature_output")
