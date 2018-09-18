@@ -53,7 +53,7 @@ class RPN(object):
 
         self.cls_reshaped = tf.reshape(
             self.classifier,
-            shape=[*tf.shape(self.classifier)[0:3], -1, 2],
+            shape=[-1, self.proposals_per_region, 2],
             name="cls_reshaped")
 
         self.cls_softmax = tf.nn.softmax(
@@ -63,7 +63,7 @@ class RPN(object):
 
         self.cls_output = tf.reshape(
             self.cls_softmax,
-            shape=[*tf.shape(self.classifier)],
+            shape=tf.shape(self.classifier),
             name="cls_output")
 
         # TODO: gather proposals with a high enough object score
@@ -90,7 +90,8 @@ class RCNNDetector(object):
             self._build_optimization()
 
     def _build_forward(self):
-        self.roi_pooling = []  # TODO
+        self.roi_pooling = tf.placeholder(
+            tf.float32, shape=[None, 2048])  # TODO
 
         self.fc1 = tf.layers.dense(
             self.roi_pooling,
