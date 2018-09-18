@@ -2,7 +2,7 @@
 
 import tensorflow as tf
 
-from conv_nets import zf
+from conv_nets import zeiler_fergus as zf
 
 
 class RPN(object):
