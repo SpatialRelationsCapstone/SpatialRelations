@@ -57,5 +57,33 @@ def generate_anchor_coordinates(image,
 
     # stack together so that the last dimension matches RPN output
     anchors = np.stack([y_ctr, x_ctr, heights, widths], axis=-1)
-    anchors = anchors.reshape(*y_ctr.shape[:2], 4 * len(sides) * len(ratios))
+    anchors = anchors.reshape(*y_ctr.shape[:2], len(sides) * len(ratios), 4)
     return anchors
+
+
+def _calculate_area(corners):
+    return (corners[1] - corners[0]) * (corners[3] - corners[2])
+
+
+def bbox_anchor_iou(anchor_coords, bbox_corners):
+    """Calculate IoU between a bbox and an anchor.
+
+    anchor coords given as (ctr_y, ctr_x, height, width)
+    bbox corners given as (ymin, ymax, xmin, xmax)
+    """
+    y, x, h, w = anchor_coords
+
+    anchor_corners = [y - h // 2, y + h // 2, x - w // 2, x + w // 2]
+
+    intersect_corners = [max(anchor_corners[0], bbox_corners[0]),
+                         min(anchor_corners[1], bbox_corners[1]),
+                         max(anchor_corners[2], bbox_corners[2]),
+                         min(anchor_corners[3], bbox_corners[3])]
+
+    intersect_area = _calculate_area(intersect_corners)
+    anchor_area = _calculate_area(anchor_corners)
+    bbox_area = _calculate_area(bbox_corners)
+
+    union_area = anchor_area + bbox_area - intersect_area
+
+    return intersect_area / union_area
