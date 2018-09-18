@@ -43,6 +43,13 @@ class RPN(object):
             strides=[1, 1],
             name="region_regressor")
 
+        reg_shape = tf.shape(self.region_regressor)
+
+        self.reg_reshaped = tf.reshape(
+            self.region_regressor,
+            shape=[reg_shape[1], reg_shape[2],     # don't need for batch dim
+                   self.proposals_per_region, 4])  # since no more conv layers
+
         # object vs background classifier
         self.classifier = tf.layers.conv2d(
             self.feature,
@@ -51,9 +58,12 @@ class RPN(object):
             strides=[1, 1],
             name="classifier")
 
+        cls_shape = tf.shape(self.classifier)
+
         self.cls_reshaped = tf.reshape(
             self.classifier,
-            shape=[-1, self.proposals_per_region, 2],
+            shape=[cls_shape[1], cls_shape[2],
+                   self.proposals_per_region, 2],
             name="cls_reshaped")
 
         self.cls_softmax = tf.nn.softmax(
