@@ -1,0 +1,44 @@
+:root {
+    --radius: 2.5px;
+    --color: rgb(255, 145, 0);
+}
+
+text {
+    font: 10px sans-serif;
+    pointer-events: none;
+    text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff;
+}
+
+.bbox {
+    fill: var(--color);
+    fill-opacity: .1;
+    stroke: var(--color);
+    stroke-width: 2px;
+    rx: var(--radius);
+    ry: var(--radius);
+}
+
+.connection {
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke: var(--color);
+}
+
+.node circle {
+    r: 5px;
+    fill: var(--color);
+}
+
+.link line {
+    stroke: black;
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+}
+
+.link polygon {
+    fill: black;
+}
+
+#image-container img, #image-container svg {
+    position: absolute;
+}

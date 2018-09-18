@@ -1,0 +1,19 @@
+{
+  "name": "SpatialRelationVisualization",
+  "version": "1.0.0",
+  "main": "src.js",
+  "author": "SpatialRelations",
+  "license": "MIT",
+  "dependencies": {
+    "@tensorflow/tfjs": "^0.12.7",
+    "d3": "^5.7.0"
+  },
+  "devDependencies": {
+    "webpack": "^4.17.2",
+    "webpack-command": "^0.4.1"
+  },
+  "scripts": {
+    "develop": "webpack ./src/src.js -o ./dist/bundle.js --mode=development --watch",
+    "build": "webpack ./src/src.js -o ./dist/bundle.js --mode=production"
+  }
+}
