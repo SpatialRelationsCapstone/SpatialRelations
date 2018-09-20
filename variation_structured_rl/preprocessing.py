@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from skimage import resize
+from skimage.transform import resize
 
 
 def resize_by_shorter(image, annotation, shorter_length=600, mode="reflect"):
@@ -61,29 +61,137 @@ def generate_anchor_coordinates(image,
     return anchors
 
 
-def _calculate_area(corners):
-    return (corners[1] - corners[0]) * (corners[3] - corners[2])
+def _calculate_area(coords):
+    return max(0, coords[1] - coords[0]) * max(0, coords[3] - coords[2])
 
 
-def bbox_anchor_iou(anchor_coords, bbox_corners):
+def _get_anchor_coords(anchor):
+    y, x, h, w = anchor
+    return y - h // 2, y + h // 2, x - w // 2, x + w // 2
+
+
+def bbox_anchor_iou(anchor_coords, bbox_coords):
     """Calculate IoU between a bbox and an anchor.
 
-    anchor coords given as (ctr_y, ctr_x, height, width)
-    bbox corners given as (ymin, ymax, xmin, xmax)
+    coords given as (ymin, ymax, xmin, xmax)
     """
-    y, x, h, w = anchor_coords
+    intersect_coords = [max(anchor_coords[0], bbox_coords[0]),
+                        min(anchor_coords[1], bbox_coords[1]),
+                        max(anchor_coords[2], bbox_coords[2]),
+                        min(anchor_coords[3], bbox_coords[3])]
 
-    anchor_corners = [y - h // 2, y + h // 2, x - w // 2, x + w // 2]
-
-    intersect_corners = [max(anchor_corners[0], bbox_corners[0]),
-                         min(anchor_corners[1], bbox_corners[1]),
-                         max(anchor_corners[2], bbox_corners[2]),
-                         min(anchor_corners[3], bbox_corners[3])]
-
-    intersect_area = _calculate_area(intersect_corners)
-    anchor_area = _calculate_area(anchor_corners)
-    bbox_area = _calculate_area(bbox_corners)
+    intersect_area = _calculate_area(intersect_coords)
+    anchor_area = _calculate_area(anchor_coords)
+    bbox_area = _calculate_area(bbox_coords)
 
     union_area = anchor_area + bbox_area - intersect_area
 
     return intersect_area / union_area
+
+
+def ground_truth_offset(anchor_coords, bbox_corners):
+    """Give the anchor-parameterized coordinates of a bounding box."""
+    ya, xa, wa, ha = anchor_coords
+    y, x, w, h = bbox_corners
+
+    ty = (y - ya) / ha
+    tx = (x - xa) / wa
+    th = np.log(h / ha)
+    tw = np.log(w / wa)
+
+    return ty, tx, th, tw
+
+
+def _sample_minibatch(objectness_label,
+                      coords_label,
+                      batch_size,
+                      max_positive):
+    pos_batch = np.stack(np.where(objectness_label == 1), axis=-1)
+    num_positive = len(pos_batch)
+    neg_batch = np.stack(np.where(objectness_label == 0), axis=-1)
+    num_negative = len(neg_batch)
+
+    final_olabel = np.zeros_like(objectness_label) - 1
+    final_clabel = np.zeros_like(coords_label) - 1
+
+    if num_positive > max_positive:
+        indices = np.arange(num_positive)
+        pos_batch = pos_batch[np.random.choice(indices, max_positive, False)]
+
+    max_negative = batch_size - min(num_positive, max_positive)
+    indices = np.arange(num_negative)
+    neg_batch = neg_batch[np.random.choice(indices, max_negative, False)]
+
+    for i in pos_batch:
+        final_olabel[tuple(i)] = 1
+        final_clabel[tuple(i)] = coords_label[tuple(i)]
+    for i in neg_batch:
+        final_olabel[tuple(i)] = 0
+
+    mask = np.int64(final_olabel > -1)
+
+    return final_olabel, final_clabel, mask
+
+
+def sample_ground_truth_targets(anchors,
+                                annotation,
+                                image_shape,
+                                pos_threshold=0.7,
+                                neg_threshold=0.3,
+                                batch_size=256,
+                                max_positive=128):
+    """Generate minibatch of ground-truth anchor coordinates and labels."""
+    # initialize ground truth labels to -1
+    objectness_label = np.zeros((anchors.shape[0:3])) - 1
+    coords_label = np.zeros(anchors.shape) - 1
+
+    # first gather bboxes (just for clarity of code)
+    otypes = ["subject", "object"]
+    bboxes = [rel[otype]["bbox"] for otype in otypes for rel in annotation]
+
+    # overlapping examples from later bboxes will overwrite earlier ones
+    for bbox in bboxes:
+        max_iou = 0
+        max_index = None
+        max_anchor = None
+        # iterate over each 4 tuple of anchor coords
+        for index in np.ndindex(anchors.shape[0:3]):
+            anchor = _get_anchor_coords(anchors[index])
+
+            # filter out anchors with centers outside bbox
+            if not (bbox[0] < anchor[0] < bbox[1] or
+                    bbox[2] < anchor[1] < bbox[3]):
+                continue
+
+            # filter out anchors that cross image boundary
+            cross_boundary_conditions = (anchor[0] < 0 or
+                                         anchor[2] < 0 or
+                                         anchor[1] > image_shape[0] or
+                                         anchor[3] > image_shape[1])
+
+            if cross_boundary_conditions:
+                continue
+
+            iou = bbox_anchor_iou(anchor, bbox)
+            # condition 1:  iou > threshold
+            if iou > pos_threshold:
+                objectness_label[index] = 1
+                coords_label[index] = ground_truth_offset(anchor, bbox)
+            elif 0 < iou < neg_threshold:
+                objectness_label[index] = 0
+
+            # condition 2: highest iou with bbox
+            if iou > max_iou:
+                max_iou = iou
+                max_index = index
+                max_anchor = anchor
+        objectness_label[max_index] = 1
+        coords_label[max_index] = ground_truth_offset(max_anchor, bbox)
+
+    # reduce batch size to 256
+    objectness_label, coords_label, mask = _sample_minibatch(objectness_label,
+                                                             coords_label,
+                                                             batch_size,
+                                                             max_positive)
+
+    return objectness_label, coords_label, mask
