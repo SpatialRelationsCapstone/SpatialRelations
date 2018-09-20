@@ -201,7 +201,7 @@ def sample_ground_truth_targets(anchors,
     return cls_target, reg_target, loss_mask
 
 
-def preprocess_data(image, annotation):
+def rpn_preprocessing(image, annotation):
     """Wrap data processing functions."""
     image, annotation = resize_by_shorter(image, annotation)
 
@@ -210,4 +210,4 @@ def preprocess_data(image, annotation):
     cls_target, reg_target, loss_mask = sample_ground_truth_targets(
         anchors, annotation, image.shape)
 
-    return image, cls_target, reg_target, loss_mask
+    return image, anchors, cls_target, reg_target, loss_mask

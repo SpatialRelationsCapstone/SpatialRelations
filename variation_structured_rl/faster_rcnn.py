@@ -72,7 +72,7 @@ class RPN(object):
             strides=[1, 1],
             name="region_regressor")
 
-        self.reg_reshaped = tf.reshape(
+        self.reg_output = tf.reshape(
             self.region_regressor,
             shape=[self.map_shape[1], self.map_shape[2],
                    self.proposals_per_region, 4])
@@ -103,7 +103,7 @@ class RPN(object):
             name="cls_loss")
 
         # regression loss (smooth L1 loss)
-        reg_diff = tf.abs(self.reg_reshaped - self.reg_target)
+        reg_diff = tf.abs(self.reg_output - self.reg_target)
         reg_loss = tf.keras.backend.switch(reg_diff < 0.5,
                                            0.5 * reg_diff ** 2,
                                            0.5 * (reg_diff - 0.5 * 0.5))
@@ -127,21 +127,100 @@ class RPN(object):
 class RCNNDetector(object):
     """Bounding box regressor and object classifier taking regions as input."""
 
-    def __init__(self, n_categories, regions, var_scope="Detector"):
+    def __init__(self,
+                 n_categories,
+                 image_input,
+                 image_feats,
+                 proposals,
+                 scores,
+                 nms_max_output_size=4000,
+                 nms_threshold=0.7,
+                 roi_pooling_dim=[4, 4],
+                 var_scope="Detector"):
         """Set hyperparameters and build graph."""
         self.n_categories = n_categories
 
-        self.regions = regions
+        self.image_input = image_input
+        self.image_feats = image_feats
+        self.proposals = proposals
+        self.scores = scores
+        self.nms_max_output_size = nms_max_output_size
+        self.nms_threshold = nms_threshold
+        self.roi_pooling_dim = roi_pooling_dim
+
         with tf.variable_scope(var_scope):
             self._build_forward()
             self._build_optimization()
 
     def _build_forward(self):
-        self.roi_pooling = tf.placeholder(
-            tf.float32, shape=[None, 2048])  # TODO
+        # non max suppression of regions suggested by RPN
+        self.anchors = tf.placeholder(
+            tf.float32,
+            shape=[None, None, None, 4])
+
+        # tf.image.non_max_suppression requires coordinates (y1, x1, y2, x2)
+        anchors_reshaped = tf.reshape(
+            self.anchors,
+            shape=[4, -1],
+            name="anchors")
+
+        proposals_reshaped = tf.reshape(
+            self.proposals,
+            shape=[4, -1])
+
+        y_a, x_a, h_a, w_a = tf.split(anchors_reshaped, 4)
+        t_y, t_x, t_h, t_w = tf.split(proposals_reshaped, 4)
+
+        y = t_y * h_a + y_a
+        x = t_x * w_a + x_a
+        h = h_a * tf.exp(t_h)
+        w = w_a * tf.exp(t_w)
+
+        # also normalize coordinates for ROI pooling operation later
+        image_shape = tf.cast(tf.shape(self.image_input), tf.float32)
+
+        y1 = (y - h // 2) / image_shape[1]
+        x1 = (x - w // 2) / image_shape[2]
+        y2 = (y1 + h) / image_shape[1]
+        x2 = (x1 + w) / image_shape[2]
+
+        self.proposal_coords = tf.reshape(
+            tf.stack([y1, x1, y2, x2]),
+            shape=[-1, 4],
+            name="proposal_coords")
+
+        # get scores from rpn softmax layer
+        softmax_reshaped = tf.reshape(
+            self.scores,
+            shape=[-1, 2])
+
+        # softmax outputs are [P(not object), P(is object)]
+        self.proposal_scores = softmax_reshaped[:, 1]
+
+        nms_indices = tf.image.non_max_suppression(
+            boxes=self.proposal_coords,
+            scores=self.proposal_scores,
+            max_output_size=self.nms_max_output_size,
+            iou_threshold=self.nms_threshold)
+
+        self.nms_proposals = tf.gather(
+            self.proposal_coords,
+            indices=nms_indices,
+            name="nms_proposals")
+
+        # ROI pooling (implemented by crop_and_resize operation)
+        # since ROIs are normalized, can be applied directly to feature map
+        self.roi_pooling = tf.image.crop_and_resize(
+            image=self.image_feats,
+            boxes=self.nms_proposals,
+            box_ind=tf.zeros_like(nms_indices),
+            crop_size=self.roi_pooling_dim,
+            name="roi_pooling")
+
+        flat = tf.layers.flatten(self.roi_pooling)
 
         self.fc1 = tf.layers.dense(
-            self.roi_pooling,
+            flat,
             units=4096,
             activation=tf.nn.relu,
             name="fc1")
@@ -155,7 +234,7 @@ class RCNNDetector(object):
         # output layers
         self.category_classifier = tf.layers.dense(
             self.fc2,
-            units=self.n_categories,
+            units=self.n_categories + 1,
             activation=tf.nn.softmax,
             name="category_classifier")
 
@@ -181,7 +260,11 @@ class FasterRCNN(object):
         """Initialize instances of the constituent modules."""
         self.conv_net = conv_net()
         self.rpn = rpn(self.conv_net.conv_output)
-        self.detector = detector(n_categories, self.rpn.final_proposals)
+        self.detector = detector(n_categories,
+                                 self.conv_net.input,
+                                 self.rpn.feature_map,
+                                 self.rpn.reg_output,
+                                 self.rpn.cls_softmax)
 
     def train(self):
         """4-step training algorithm to learn shared features."""
