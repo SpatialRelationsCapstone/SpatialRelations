@@ -28,10 +28,10 @@ def resize_by_shorter(image, annotation, shorter_length=600, mode="reflect"):
     return resized, annotation
 
 
-def generate_anchor_coordinates(image,
-                                stride=16,
-                                sides=[128, 256, 512],
-                                ratios=[0.5, 1, 2]):
+def generate_anchors(image,
+                     stride=16,
+                     sides=[128, 256, 512],
+                     ratios=[0.5, 1, 2]):
     """Generate anchors to serve as regression targets."""
     imheight, imwidth, _ = image.shape
 
@@ -61,11 +61,13 @@ def generate_anchor_coordinates(image,
     return anchors
 
 
-def _calculate_area(coords):
+def calculate_area(coords):
+    """Given box coordinates (ymin, ymax, xmin,  xmax) calculate box area."""
     return max(0, coords[1] - coords[0]) * max(0, coords[3] - coords[2])
 
 
-def _get_anchor_coords(anchor):
+def get_anchor_coords(anchor):
+    """Change anchor representation from yxhw to (ymin, ymax, xmin, xmax)."""
     y, x, h, w = anchor
     return y - h // 2, y + h // 2, x - w // 2, x + w // 2
 
@@ -80,9 +82,9 @@ def bbox_anchor_iou(anchor_coords, bbox_coords):
                         max(anchor_coords[2], bbox_coords[2]),
                         min(anchor_coords[3], bbox_coords[3])]
 
-    intersect_area = _calculate_area(intersect_coords)
-    anchor_area = _calculate_area(anchor_coords)
-    bbox_area = _calculate_area(bbox_coords)
+    intersect_area = calculate_area(intersect_coords)
+    anchor_area = calculate_area(anchor_coords)
+    bbox_area = calculate_area(bbox_coords)
 
     union_area = anchor_area + bbox_area - intersect_area
 
@@ -102,17 +104,18 @@ def ground_truth_offset(anchor_coords, bbox_corners):
     return ty, tx, th, tw
 
 
-def _sample_minibatch(objectness_label,
-                      coords_label,
-                      batch_size,
-                      max_positive):
-    pos_batch = np.stack(np.where(objectness_label == 1), axis=-1)
+def sample_minibatch(cls_target,
+                     reg_target,
+                     batch_size,
+                     max_positive):
+    """From a set of positive and negative labels, sample a certain amount."""
+    pos_batch = np.stack(np.where(cls_target == 1), axis=-1)
     num_positive = len(pos_batch)
-    neg_batch = np.stack(np.where(objectness_label == 0), axis=-1)
+    neg_batch = np.stack(np.where(cls_target == 0), axis=-1)
     num_negative = len(neg_batch)
 
-    final_olabel = np.zeros_like(objectness_label) - 1
-    final_clabel = np.zeros_like(coords_label) - 1
+    final_olabel = np.zeros_like(cls_target) - 1
+    final_clabel = np.zeros_like(reg_target) - 1
 
     if num_positive > max_positive:
         indices = np.arange(num_positive)
@@ -124,13 +127,14 @@ def _sample_minibatch(objectness_label,
 
     for i in pos_batch:
         final_olabel[tuple(i)] = 1
-        final_clabel[tuple(i)] = coords_label[tuple(i)]
+        final_clabel[tuple(i)] = reg_target[tuple(i)]
     for i in neg_batch:
         final_olabel[tuple(i)] = 0
 
-    mask = np.int64(final_olabel > -1)
+    loss_mask = np.int64(final_olabel > -1)
+    loss_mask = np.expand_dims(loss_mask, -1)
 
-    return final_olabel, final_clabel, mask
+    return final_olabel, final_clabel, loss_mask
 
 
 def sample_ground_truth_targets(anchors,
@@ -142,8 +146,8 @@ def sample_ground_truth_targets(anchors,
                                 max_positive=128):
     """Generate minibatch of ground-truth anchor coordinates and labels."""
     # initialize ground truth labels to -1
-    objectness_label = np.zeros((anchors.shape[0:3])) - 1
-    coords_label = np.zeros(anchors.shape) - 1
+    cls_target = np.zeros((anchors.shape[0:3])) - 1
+    reg_target = np.zeros(anchors.shape) - 1
 
     # first gather bboxes (just for clarity of code)
     otypes = ["subject", "object"]
@@ -156,7 +160,7 @@ def sample_ground_truth_targets(anchors,
         max_anchor = None
         # iterate over each 4 tuple of anchor coords
         for index in np.ndindex(anchors.shape[0:3]):
-            anchor = _get_anchor_coords(anchors[index])
+            anchor = get_anchor_coords(anchors[index])
 
             # filter out anchors with centers outside bbox
             if not (bbox[0] < anchor[0] < bbox[1] or
@@ -175,23 +179,35 @@ def sample_ground_truth_targets(anchors,
             iou = bbox_anchor_iou(anchor, bbox)
             # condition 1:  iou > threshold
             if iou > pos_threshold:
-                objectness_label[index] = 1
-                coords_label[index] = ground_truth_offset(anchor, bbox)
+                cls_target[index] = 1
+                reg_target[index] = ground_truth_offset(anchor, bbox)
             elif 0 < iou < neg_threshold:
-                objectness_label[index] = 0
+                cls_target[index] = 0
 
             # condition 2: highest iou with bbox
             if iou > max_iou:
                 max_iou = iou
                 max_index = index
                 max_anchor = anchor
-        objectness_label[max_index] = 1
-        coords_label[max_index] = ground_truth_offset(max_anchor, bbox)
+        cls_target[max_index] = 1
+        reg_target[max_index] = ground_truth_offset(max_anchor, bbox)
 
-    # reduce batch size to 256
-    objectness_label, coords_label, mask = _sample_minibatch(objectness_label,
-                                                             coords_label,
-                                                             batch_size,
-                                                             max_positive)
+    # reduce batch size
+    cls_target, reg_target, loss_mask = sample_minibatch(cls_target,
+                                                         reg_target,
+                                                         batch_size,
+                                                         max_positive)
 
-    return objectness_label, coords_label, mask
+    return cls_target, reg_target, loss_mask
+
+
+def preprocess_data(image, annotation):
+    """Wrap data processing functions."""
+    image, annotation = resize_by_shorter(image, annotation)
+
+    anchors = generate_anchors(image)
+
+    cls_target, reg_target, loss_mask = sample_ground_truth_targets(
+        anchors, annotation, image.shape)
+
+    return image, cls_target, reg_target, loss_mask
