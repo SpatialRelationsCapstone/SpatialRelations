@@ -9,30 +9,39 @@ class RPN(object):
     """Region proposal network taking convolutional feature maps as input."""
 
     def __init__(self,
-                 input_layer,
+                 image_input,
+                 conv_output,
                  balancing_param=10,
                  batch_size=256,
                  feature_dim=256,
                  proposals_per_region=9,
+                 nms_max_output_size=4000,
+                 nms_threshold=0.7,
                  learning_rate=0.001,
                  momentum=0.9,
                  var_scope="RPN"):
         """Set hyperparameters and build graph."""
+        # hyperparameters
         self.balancing_param = balancing_param
         self.batch_size = batch_size
         self.feature_dim = feature_dim
         self.proposals_per_region = proposals_per_region
+        self.nms_max_output_size = nms_max_output_size
+        self.nms_threshold = nms_threshold
         self.learning_rate = learning_rate
         self.momentum = momentum
 
-        self.input_layer = input_layer
+        # tensorflow operations
+        self.image_input = image_input
+        self.conv_output = conv_output
         with tf.variable_scope(var_scope):
             self._build_forward()
             self._build_optimization()
+            self._build_nms_output()
 
     def _build_forward(self):
         self.mini_network = tf.layers.conv2d(
-            self.input_layer,
+            self.conv_output,
             filters=self.feature_dim,
             kernel_size=[3, 3],
             strides=[1, 1],
@@ -123,40 +132,11 @@ class RPN(object):
         self.optimizer = tf.train.MomentumOptimizer(
             self.learning_rate, self.momentum).minimize(self.loss)
 
-
-class RCNNDetector(object):
-    """Bounding box regressor and object classifier taking regions as input."""
-
-    def __init__(self,
-                 n_categories,
-                 image_input,
-                 image_feats,
-                 proposals,
-                 scores,
-                 nms_max_output_size=4000,
-                 nms_threshold=0.7,
-                 roi_pooling_dim=[4, 4],
-                 var_scope="Detector"):
-        """Set hyperparameters and build graph."""
-        self.n_categories = n_categories
-
-        self.image_input = image_input
-        self.image_feats = image_feats
-        self.proposals = proposals
-        self.scores = scores
-        self.nms_max_output_size = nms_max_output_size
-        self.nms_threshold = nms_threshold
-        self.roi_pooling_dim = roi_pooling_dim
-
-        with tf.variable_scope(var_scope):
-            self._build_forward()
-            self._build_optimization()
-
-    def _build_forward(self):
-        # non max suppression of regions suggested by RPN
+    def _build_nms_output(self):
+        # non max suppression
         self.anchors = tf.placeholder(
             tf.float32,
-            shape=[None, None, None, 4])
+            shape=[None, None, self.proposals_per_region, 4])
 
         # tf.image.non_max_suppression requires coordinates (y1, x1, y2, x2)
         anchors_reshaped = tf.reshape(
@@ -165,7 +145,7 @@ class RCNNDetector(object):
             name="anchors")
 
         proposals_reshaped = tf.reshape(
-            self.proposals,
+            self.reg_output,
             shape=[4, -1])
 
         y_a, x_a, h_a, w_a = tf.split(anchors_reshaped, 4)
@@ -189,9 +169,9 @@ class RCNNDetector(object):
             shape=[-1, 4],
             name="proposal_coords")
 
-        # get scores from rpn softmax layer
+        # get scores from softmax layer
         softmax_reshaped = tf.reshape(
-            self.scores,
+            self.cls_softmax,
             shape=[-1, 2])
 
         # softmax outputs are [P(not object), P(is object)]
@@ -208,12 +188,39 @@ class RCNNDetector(object):
             indices=nms_indices,
             name="nms_proposals")
 
+
+class RCNNDetector(object):
+    """Bounding box regressor and object classifier taking regions as input."""
+
+    def __init__(self,
+                 image_feats,
+                 proposals,
+                 reg_target,
+                 n_categories,
+                 roi_pooling_dim=[4, 4],
+                 var_scope="Detector"):
+        """Set hyperparameters and build graph."""
+        self.n_categories = n_categories
+
+        # tensorflow operations
+        self.image_feats = image_feats
+        self.proposals = proposals
+        self.reg_target = reg_target
+
+        # hyperparameters
+        self.roi_pooling_dim = roi_pooling_dim
+
+        with tf.variable_scope(var_scope):
+            self._build_forward()
+            self._build_optimization()
+
+    def _build_forward(self):
         # ROI pooling (implemented by crop_and_resize operation)
         # since ROIs are normalized, can be applied directly to feature map
         self.roi_pooling = tf.image.crop_and_resize(
             image=self.image_feats,
-            boxes=self.nms_proposals,
-            box_ind=tf.zeros_like(nms_indices),
+            boxes=self.proposals,
+            box_ind=tf.zeros(tf.shape(self.proposals)[0], tf.int32),
             crop_size=self.roi_pooling_dim,
             name="roi_pooling")
 
@@ -245,8 +252,10 @@ class RCNNDetector(object):
             name="regressor")
 
     def _build_optimization(self):
-        # TODO: multi-task loss - classification loss + bbox regression loss
-        pass
+        self.cls_target = tf.placeholder(
+            tf.int32,
+            shape=[None],
+            name="cls_target")
 
 
 class FasterRCNN(object):
@@ -259,12 +268,14 @@ class FasterRCNN(object):
                  detector=RCNNDetector):
         """Initialize instances of the constituent modules."""
         self.conv_net = conv_net()
-        self.rpn = rpn(self.conv_net.conv_output)
-        self.detector = detector(n_categories,
-                                 self.conv_net.input,
-                                 self.rpn.feature_map,
-                                 self.rpn.reg_output,
-                                 self.rpn.cls_softmax)
+
+        self.rpn = rpn(self.conv_net.input,
+                       self.conv_net.conv_output)
+
+        self.detector = detector(self.rpn.feature_map,
+                                 self.rpn.nms_proposals,
+                                 self.rpn.reg_target,
+                                 n_categories)
 
     def train(self):
         """4-step training algorithm to learn shared features."""

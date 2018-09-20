@@ -91,9 +91,9 @@ def bbox_anchor_iou(anchor_coords, bbox_coords):
     return intersect_area / union_area
 
 
-def ground_truth_offset(anchor_coords, bbox_corners):
-    """Give the anchor-parameterized coordinates of a bounding box."""
-    ya, xa, wa, ha = anchor_coords
+def ground_truth_offset(region_coords, bbox_corners):
+    """Give the region-parameterized coordinates of a bounding box."""
+    ya, xa, wa, ha = region_coords
     y, x, w, h = bbox_corners
 
     ty = (y - ya) / ha
@@ -211,3 +211,5 @@ def rpn_preprocessing(image, annotation):
         anchors, annotation, image.shape)
 
     return image, anchors, cls_target, reg_target, loss_mask
+
+
