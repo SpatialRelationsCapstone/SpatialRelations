@@ -113,9 +113,9 @@ class RPN(object):
 
         # regression loss (smooth L1 loss)
         reg_diff = tf.abs(self.reg_output - self.reg_target)
-        reg_loss = tf.keras.backend.switch(reg_diff < 0.5,
+        reg_loss = tf.keras.backend.switch(reg_diff < 1,
                                            0.5 * reg_diff ** 2,
-                                           0.5 * (reg_diff - 0.5 * 0.5))
+                                           reg_diff - 0.5)
         pos_mask = tf.expand_dims(tf.cast(self.cls_target, tf.float32), -1)
         self.reg_loss = tf.reduce_sum(
             reg_loss * self.loss_mask * pos_mask,
@@ -161,8 +161,8 @@ class RPN(object):
 
         y1 = (y - h // 2) / image_shape[1]
         x1 = (x - w // 2) / image_shape[2]
-        y2 = (y1 + h) / image_shape[1]
-        x2 = (x1 + w) / image_shape[2]
+        y2 = (y + h // 2) / image_shape[1]
+        x2 = (x + w // 2) / image_shape[2]
 
         self.proposal_coords = tf.reshape(
             tf.stack([y1, x1, y2, x2]),
@@ -195,8 +195,10 @@ class RCNNDetector(object):
     def __init__(self,
                  image_feats,
                  proposals,
-                 reg_target,
                  n_categories,
+                 balancing_param=1,
+                 learning_rate=0.001,
+                 momentum=0.9,
                  roi_pooling_dim=[4, 4],
                  var_scope="Detector"):
         """Set hyperparameters and build graph."""
@@ -205,9 +207,11 @@ class RCNNDetector(object):
         # tensorflow operations
         self.image_feats = image_feats
         self.proposals = proposals
-        self.reg_target = reg_target
 
         # hyperparameters
+        self.balancing_param = balancing_param
+        self.learning_rate = learning_rate
+        self.momentum = momentum
         self.roi_pooling_dim = roi_pooling_dim
 
         with tf.variable_scope(var_scope):
@@ -257,6 +261,55 @@ class RCNNDetector(object):
             shape=[None],
             name="cls_target")
 
+        self.reg_target = tf.placeholder(
+            tf.float32,
+            shape=[None, self.n_categories, 4],
+            name="reg_target")
+
+        # classification loss
+        cls_target_one_hot = tf.one_hot(
+            self.cls_target,
+            self.n_categories + 1)
+
+        self.cls_pred = tf.reduce_sum(
+            cls_target_one_hot * self.category_classifier,
+            axis=-1,
+            name="cls_pred")
+
+        nonzero_preds = tf.gather(self.cls_pred, tf.where(self.cls_pred > 0))
+
+        self.cls_loss = tf.reduce_mean(
+            -tf.log(nonzero_preds),
+            name="cls_loss")
+
+        # regression loss
+        reg_reshaped = tf.reshape(
+            self.regressor,
+            shape=[-1, self.n_categories, 4])
+
+        reg_loss_mask = tf.expand_dims(
+            tf.one_hot(self.cls_target - 1, self.n_categories),
+            axis=-1)
+
+        reg_diff = tf.abs(reg_reshaped - self.reg_target)
+        reg_loss = tf.keras.backend.switch(reg_diff < 1,
+                                           0.5 * reg_diff ** 2,
+                                           reg_diff - 0.5)
+
+        self.reg_loss = tf.reduce_mean(
+            reg_loss * reg_loss_mask,
+            name="reg_loss")
+
+        # multitask loss
+        self.loss = tf.add(
+            self.cls_loss,
+            self.balancing_param * self.reg_loss,
+            name="loss")
+
+        # optimizer
+        self.optimizer = tf.train.MomentumOptimizer(
+            self.learning_rate, self.momentum).minimize(self.loss)
+
 
 class FasterRCNN(object):
     """End-to-end region proposal and object classification/localization."""
@@ -274,7 +327,6 @@ class FasterRCNN(object):
 
         self.detector = detector(self.rpn.feature_map,
                                  self.rpn.nms_proposals,
-                                 self.rpn.reg_target,
                                  n_categories)
 
     def train(self):
