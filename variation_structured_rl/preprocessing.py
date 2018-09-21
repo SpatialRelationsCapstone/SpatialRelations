@@ -66,35 +66,41 @@ def calculate_area(coords):
     return max(0, coords[1] - coords[0]) * max(0, coords[3] - coords[2])
 
 
-def get_anchor_coords(anchor):
-    """Change anchor representation from yxhw to (ymin, ymax, xmin, xmax)."""
-    y, x, h, w = anchor
+def yxhw_to_yyxx(box):
+    """Change box representation from yxhw to (ymin, ymax, xmin, xmax)."""
+    y, x, h, w = box
     return y - h // 2, y + h // 2, x - w // 2, x + w // 2
 
 
-def bbox_anchor_iou(anchor_coords, bbox_coords):
-    """Calculate IoU between a bbox and an anchor.
+def yyxx_to_yxhw(coords):
+    """Change box representation from (ymin, ymax, xmin, xmax) to yxhw."""
+    ymin, ymax, xmin, xmax = coords
+    return (ymin + ymax) // 2, (xmin + xmax) // 2, ymax - ymin, xmax - xmin
+
+
+def calculate_iou(box_a, box_b):
+    """Calculate IoU between two bboxes.
 
     coords given as (ymin, ymax, xmin, xmax)
     """
-    intersect_coords = [max(anchor_coords[0], bbox_coords[0]),
-                        min(anchor_coords[1], bbox_coords[1]),
-                        max(anchor_coords[2], bbox_coords[2]),
-                        min(anchor_coords[3], bbox_coords[3])]
+    intersect_coords = [max(box_a[0], box_b[0]),
+                        min(box_a[1], box_b[1]),
+                        max(box_a[2], box_b[2]),
+                        min(box_a[3], box_b[3])]
 
     intersect_area = calculate_area(intersect_coords)
-    anchor_area = calculate_area(anchor_coords)
-    bbox_area = calculate_area(bbox_coords)
+    anchor_area = calculate_area(box_a)
+    bbox_area = calculate_area(box_b)
 
     union_area = anchor_area + bbox_area - intersect_area
 
     return intersect_area / union_area
 
 
-def ground_truth_offset(region_coords, bbox_corners):
+def ground_truth_offset(region_coords, bbox_coords):
     """Give the region-parameterized coordinates of a bounding box."""
-    ya, xa, wa, ha = region_coords
-    y, x, w, h = bbox_corners
+    ya, xa, wa, ha = yyxx_to_yxhw(region_coords)
+    y, x, w, h = yyxx_to_yxhw(bbox_coords)
 
     ty = (y - ya) / ha
     tx = (x - xa) / wa
@@ -137,21 +143,23 @@ def sample_minibatch(cls_target,
     return final_olabel, final_clabel, loss_mask
 
 
-def sample_ground_truth_targets(anchors,
-                                annotation,
-                                image_shape,
-                                pos_threshold=0.7,
-                                neg_threshold=0.3,
-                                batch_size=256,
-                                max_positive=128):
-    """Generate minibatch of ground-truth anchor coordinates and labels."""
+def generate_rpn_targets(anchors,
+                         annotation,
+                         image_shape,
+                         pos_threshold=0.7,
+                         neg_threshold=0.3,
+                         batch_size=256,
+                         max_positive=128):
+    """Generate minibatch of anchor-parameterized coordinates and labels."""
     # initialize ground truth labels to -1
     cls_target = np.zeros((anchors.shape[0:3])) - 1
     reg_target = np.zeros(anchors.shape) - 1
 
-    # first gather bboxes (just for clarity of code)
+    # first gather bboxes
     otypes = ["subject", "object"]
     bboxes = [rel[otype]["bbox"] for otype in otypes for rel in annotation]
+    # shuffle them so that order of overlapping examples doesn't introduce bias
+    np.random.shuffle(bboxes)
 
     # overlapping examples from later bboxes will overwrite earlier ones
     for bbox in bboxes:
@@ -160,7 +168,7 @@ def sample_ground_truth_targets(anchors,
         max_anchor = None
         # iterate over each 4 tuple of anchor coords
         for index in np.ndindex(anchors.shape[0:3]):
-            anchor = get_anchor_coords(anchors[index])
+            anchor = yxhw_to_yyxx(anchors[index])
 
             # filter out anchors with centers outside bbox
             if not (bbox[0] < anchor[0] < bbox[1] or
@@ -176,7 +184,7 @@ def sample_ground_truth_targets(anchors,
             if cross_boundary_conditions:
                 continue
 
-            iou = bbox_anchor_iou(anchor, bbox)
+            iou = calculate_iou(anchor, bbox)
             # condition 1:  iou > threshold
             if iou > pos_threshold:
                 cls_target[index] = 1
@@ -202,14 +210,67 @@ def sample_ground_truth_targets(anchors,
 
 
 def rpn_preprocessing(image, annotation):
-    """Wrap data processing functions."""
+    """Wrap data processing functions for RPN input."""
     image, annotation = resize_by_shorter(image, annotation)
 
     anchors = generate_anchors(image)
 
-    cls_target, reg_target, loss_mask = sample_ground_truth_targets(
+    cls_target, reg_target, loss_mask = generate_rpn_targets(
         anchors, annotation, image.shape)
 
-    return image, anchors, cls_target, reg_target, loss_mask
+    return image, annotation, anchors, cls_target, reg_target, loss_mask
 
 
+def generate_detector_targets(image,
+                              annotation,
+                              proposals,
+                              n_categories=100,
+                              pos_threshold=0.5,
+                              neg_threshold=0.1):
+    """Generate minibatch of region-parameterized coordinates and labels.
+
+    Proposals are normalized by image size, and given as [y1, x1, y2, x2].
+    """
+    imheight, imwidth, _ = image.shape
+
+    cls_target = np.zeros(proposals.shape[0]) - 1
+    reg_target = np.zeros((proposals.shape[0], n_categories, 4))
+
+    # get bboxes and categories
+    bboxes = []
+    categories = []
+    for rel in annotation:
+        for otype in ["subject", "object"]:
+            bboxes.append(rel[otype]["bbox"])
+            categories.append(rel[otype]["category"])
+
+    # match each proposal with the bbox it has the highest IoU with
+    for index in range(proposals.shape[0]):
+        max_iou = 0
+        max_category = None
+        max_bbox = None
+
+        proposal = proposals[index]
+        ymin = proposal[0] * imheight
+        ymax = proposal[2] * imheight
+        xmin = proposal[1] * imwidth
+        xmax = proposal[3] * imwidth
+        region = [ymin, ymax, xmin, xmax]
+
+        for bbox, category in zip(bboxes, categories):
+            iou = calculate_iou(region, bbox)
+
+            if iou > max_iou:
+                max_iou = iou
+                max_category = category
+                max_bbox = bbox
+
+        if max_iou > pos_threshold:
+            cls_target[index] = max_category + 1
+            reg_target[index][max_category] = ground_truth_offset(region,
+                                                                  max_bbox)
+
+        elif max_iou > neg_threshold:
+            cls_target[index] = 0
+
+    return cls_target, reg_target
