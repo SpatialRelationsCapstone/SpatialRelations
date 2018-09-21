@@ -39,6 +39,10 @@ class RPN(object):
             self._build_optimization()
             self._build_nms_output()
 
+    def train_step(self, sess, feed_dict):
+        """Run a single iteration of gradient descent."""
+        sess.run(self.optimizer.minimize(self.loss))
+
     def _build_forward(self):
         self.mini_network = tf.layers.conv2d(
             self.conv_output,
@@ -130,7 +134,7 @@ class RPN(object):
 
         # optimizer
         self.optimizer = tf.train.MomentumOptimizer(
-            self.learning_rate, self.momentum).minimize(self.loss)
+            self.learning_rate, self.momentum)
 
     def _build_nms_output(self):
         # non max suppression
@@ -218,6 +222,10 @@ class RCNNDetector(object):
             self._build_forward()
             self._build_optimization()
 
+    def train_step(self, sess, feed_dict):
+        """Run a single iteration of gradient descent."""
+        sess.run(self.optimizer.minimize(self.loss))
+
     def _build_forward(self):
         # ROI pooling (implemented by crop_and_resize operation)
         # since ROIs are normalized, can be applied directly to feature map
@@ -255,6 +263,11 @@ class RCNNDetector(object):
             activation=None,
             name="regressor")
 
+        self.reg_output = tf.reshape(
+            self.regressor,
+            shape=[-1, self.n_categories, 4],
+            name="reg_output")
+
     def _build_optimization(self):
         self.cls_target = tf.placeholder(
             tf.int32,
@@ -283,15 +296,11 @@ class RCNNDetector(object):
             name="cls_loss")
 
         # regression loss
-        reg_reshaped = tf.reshape(
-            self.regressor,
-            shape=[-1, self.n_categories, 4])
-
         reg_loss_mask = tf.expand_dims(
             tf.one_hot(self.cls_target - 1, self.n_categories),
             axis=-1)
 
-        reg_diff = tf.abs(reg_reshaped - self.reg_target)
+        reg_diff = tf.abs(self.reg_output - self.reg_target)
         reg_loss = tf.keras.backend.switch(reg_diff < 1,
                                            0.5 * reg_diff ** 2,
                                            reg_diff - 0.5)
@@ -308,7 +317,7 @@ class RCNNDetector(object):
 
         # optimizer
         self.optimizer = tf.train.MomentumOptimizer(
-            self.learning_rate, self.momentum).minimize(self.loss)
+            self.learning_rate, self.momentum)
 
 
 class FasterRCNN(object):

@@ -221,56 +221,47 @@ def rpn_preprocessing(image, annotation):
     return image, annotation, anchors, cls_target, reg_target, loss_mask
 
 
-def generate_detector_targets(image,
-                              annotation,
-                              proposals,
-                              n_categories=100,
-                              pos_threshold=0.5,
-                              neg_threshold=0.1):
-    """Generate minibatch of region-parameterized coordinates and labels.
-
-    Proposals are normalized by image size, and given as [y1, x1, y2, x2].
-    """
+def postprocess_rcnn_output(image,
+                            proposals,
+                            rcnn_cls_output,
+                            rcnn_reg_output,
+                            n=5):
+    """Get top-n category labels and bbox coordinates from rcnn output."""
     imheight, imwidth, _ = image.shape
 
-    cls_target = np.zeros(proposals.shape[0]) - 1
-    reg_target = np.zeros((proposals.shape[0], n_categories, 4))
+    categories = np.argmax(rcnn_cls_output, axis=-1) - 1
 
-    # get bboxes and categories
-    bboxes = []
-    categories = []
-    for rel in annotation:
-        for otype in ["subject", "object"]:
-            bboxes.append(rel[otype]["bbox"])
-            categories.append(rel[otype]["category"])
+    # filter out predictions indicating no object (background)
+    probabilities = np.max(rcnn_cls_output, axis=-1)[categories > -1]
+    bboxes = rcnn_reg_output[categories > -1]
+    proposals = proposals[categories > -1]
+    categories = categories[categories > -1]
 
-    # match each proposal with the bbox it has the highest IoU with
-    for index in range(proposals.shape[0]):
-        max_iou = 0
-        max_category = None
-        max_bbox = None
+    # get top n objects by confidence
+    top_n_indices = np.argsort(probabilities)[:n]
+    top_n_proposals = proposals[top_n_indices]
+    top_n_categories = categories[top_n_indices]
+    top_n_bboxes = bboxes[[top_n_indices, top_n_categories]]
 
-        proposal = proposals[index]
+    for i in range(top_n_bboxes.shape[0]):
+        proposal = top_n_proposals[i]
+        bbox = top_n_bboxes[i]
+
+        # unnormalize proposal, get in yxhw format
         ymin = proposal[0] * imheight
         ymax = proposal[2] * imheight
         xmin = proposal[1] * imwidth
         xmax = proposal[3] * imwidth
-        region = [ymin, ymax, xmin, xmax]
 
-        for bbox, category in zip(bboxes, categories):
-            iou = calculate_iou(region, bbox)
+        a_y, a_x, a_h, a_w = yyxx_to_yxhw([ymin, ymax, xmin, xmax])
 
-            if iou > max_iou:
-                max_iou = iou
-                max_category = category
-                max_bbox = bbox
+        # get bbox coordinates in [ymin, ymax, xmin, xmax]
+        t_y, t_x, t_h, t_w = bbox
+        y = t_y * a_h + a_y
+        x = t_x * a_w + a_x
+        h = a_h * np.exp(t_h)
+        w = a_w * np.exp(t_w)
 
-        if max_iou > pos_threshold:
-            cls_target[index] = max_category + 1
-            reg_target[index][max_category] = ground_truth_offset(region,
-                                                                  max_bbox)
+        top_n_bboxes[i] = yxhw_to_yyxx([y, x, h, w])
 
-        elif max_iou > neg_threshold:
-            cls_target[index] = 0
-
-    return cls_target, reg_target
+    return top_n_categories, top_n_bboxes
