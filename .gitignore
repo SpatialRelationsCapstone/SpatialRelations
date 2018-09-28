@@ -3,3 +3,4 @@ keras_yolo3/
 *.ipynb
 .floydexpt
 floyd.yml
+output/
