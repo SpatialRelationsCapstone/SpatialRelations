@@ -4,7 +4,14 @@ import numpy as np
 import os
 import tensorflow as tf
 
+from keras_yolo3.yolo import YOLO
+
 from collections import deque
+
+
+YOLO_PATH = "keras_yolo3/model_data/trained_weights_final.h5"
+ANCHORS_PATH = "keras_yolo3/model_data/tiny_yolo_anchors.txt"
+CLASSES_PATH = "keras_yolo3/model_data/vrd_classes.txt"
 
 
 class Memory(object):
@@ -30,34 +37,26 @@ class Memory(object):
 
 
 class DQN(object):
-    """Deep Q network that estimates attribute, predicate and object values."""
+    """Deep Q network that estimates predicate and object values."""
 
     def __init__(self,
-                 n_attributes,
                  n_predicates,
                  n_object_categories,
-                 image_feats,
-                 subject_feats,
-                 object_feats,
-                 phrase_embedding,
-                 learning_rate,
+                 learning_rate=0.001,
+                 feature_map_dim=315,
+                 roi_pooling_dim=[4, 4],
                  save_path=None,
                  var_scope="DQN"):
         """Initialize hyperparameters and dataset-dependent parameters."""
-        self.n_attributes = n_attributes
         self.n_predicates = n_predicates
         self.n_object_categories = n_object_categories
-
-        # inputs on tensorflow graph
-        self.image_feats = image_feats
-        self.subject_feats = subject_feats
-        self.object_feats = object_feats
-        self.phrase_embedding = phrase_embedding
+        self.roi_pooling_dim = roi_pooling_dim
 
         # hyperparameters
         self.learning_rate = learning_rate
 
         # setup model saver
+        self.save_path = save_path
         if self.save_path:
             self.saver = tf.train.Saver()
 
@@ -76,11 +75,47 @@ class DQN(object):
 
     def _build_forward(self):
         """Construct tensorflow graph for forward pass (outputs Q values)."""
+        # inputs
+        self.input_feature_map = tf.placeholder(
+            tf.float32,
+            shape=[1, None, None, 315],
+            name="input_feature_map")
+
+        self.subject_bbox = tf.placeholder(
+            tf.float32,
+            shape=[1, 4],
+            name="subject_bbox")
+
+        self.object_bbox = tf.placeholder(
+            tf.float32,
+            shape=[1, 4],
+            name="object_bbox")
+
+        self.image_feats = tf.layers.flatten(
+            self.input_feature_map,
+            name="image_feats")
+
+        self.subject_feats = tf.layers.flatten(
+            tf.image.crop_and_resize(
+                image=self.input_feature_map,
+                boxes=self.subject_bbox,
+                box_ind=tf.constant([0]),
+                crop_size=self.roi_pooling_dim),
+            name="subject_feats")
+
+        self.object_feats = tf.layers.flatten(
+            tf.image.crop_and_resize(
+                image=self.input_feature_map,
+                boxes=self.object_bbox,
+                box_ind=tf.constant([0]),
+                crop_size=self.roi_pooling_dim),
+            name="object_feats")
+
+        # state representation layers
         self.state_features = tf.concat(
             values=[self.image_feats,
                     self.subject_feats,
-                    self.object_feats,
-                    self.phrase_embedding],
+                    self.object_feats],
             axis=-1)
 
         self.fusion1 = tf.layers.dense(
@@ -95,13 +130,7 @@ class DQN(object):
             activation=tf.nn.relu,
             name="fusion2")
 
-        # Q values for the 3 types of actions
-        self.attribute_Q = tf.layers.dense(
-            inputs=self.fusion2,
-            units=self.n_attributes,
-            activation=None,
-            name="attribute_Q")
-
+        # Q values for the 2 types of actions
         self.predicate_Q = tf.layers.dense(
             inputs=self.fusion2,
             units=self.n_predicates,
@@ -116,39 +145,15 @@ class DQN(object):
 
     def _build_optimization(self):
         """Construct graph for network updates."""
-        # attribute gradient
-        self.attribute_return = tf.placeholder(
-            tf.float32,
-            [None],
-            name="attribute_return")
-
-        self.attribute_action = tf.placeholder(
-            tf.float32,
-            [None, self.n_attributes],
-            name="attribute_action")
-
-        self.attribute_value = tf.reduce_sum(
-            self.attribute_action * self.attribute_Q,
-            axis=1,
-            name="attribute_value")
-
-        self.attribute_grad_coef = tf.stop_gradient(
-            self.attribute_return - self.attribute_value,
-            name="attribute_grad_coef")
-
-        self.attribute_gradient = -tf.reduce_mean(
-            self.attribute_grad_coef * self.attribute_value,
-            name="attribute_gradient")
-
         # predicate gradient
         self.predicate_return = tf.placeholder(
             tf.float32,
-            [None],
+            shape=[None],
             name="predicate_return")
 
         self.predicate_action = tf.placeholder(
             tf.float32,
-            [None, self.n_predicates],
+            shape=[None, self.n_predicates],
             name="predicate_action")
 
         self.predicate_value = tf.reduce_sum(
@@ -167,12 +172,12 @@ class DQN(object):
         # category gradient
         self.category_return = tf.placeholder(
             tf.float32,
-            [None],
+            shape=[None],
             name="category_return")
 
         self.category_action = tf.placeholder(
             tf.float32,
-            [None, self.n_object_categories],
+            shape=[None, self.n_object_categories],
             name="category_action")
 
         self.category_value = tf.reduce_sum(
@@ -189,23 +194,21 @@ class DQN(object):
             name="category_gradient")
 
         # optimization ops
-        self.attribute_optimizer = tf.train.RMSPropOptimizer(
-            self.learning_rate).minimize(self.attribute_gradient)
+        self.multitask_loss = self.predicate_gradient + self.category_gradient
 
-        self.predicate_optimizer = tf.train.RMSPropOptimizer(
-            self.learning_rate).minimize(self.predicate_gradient)
-
-        self.category_optimizer = tf.train.RMSPropOptimizer(
-            self.learning_rate).minimize(self.category_gradient)
+        self.optimizer = tf.train.RMSPropOptimizer(
+            self.learning_rate).minimize(self.multitask_loss)
 
 
 class VRL(object):
     """Variation-structured RL model that builds directed semantic graphs."""
 
     def __init__(self,
-                 n_attributes,
                  n_predicates,
                  n_object_categories,
+                 yolo_model=YOLO_PATH,
+                 yolo_anchors=ANCHORS_PATH,
+                 yolo_classes=CLASSES_PATH,
                  target_update_frequency=10000,
                  discount_factor=0.9,
                  learning_rate=0.001,
@@ -217,16 +220,14 @@ class VRL(object):
         self.target_update_frequency = target_update_frequency
         self.discount_factor = discount_factor
 
-        # TODO: build object detector, get input placeholders to DQN
-        image_feats, subject_feats, object_feats = []
-
-        # TODO: get embedding placeholder from skip-gram model
-        phrase_embedding = []
+        # initialize object detector
+        self.detector = YOLO(model_path=yolo_model,
+                             anchors_path=yolo_anchors,
+                             classes_path=yolo_classes)
 
         # build network
-        network_args = [n_attributes, n_predicates, n_object_categories,
-                        image_feats, subject_feats, object_feats,
-                        phrase_embedding, learning_rate]
+        network_args = [n_predicates, n_object_categories,
+                        learning_rate]
 
         tf.reset_default_graph()
         self.DQN = DQN(*network_args, save_path=self.save_path)

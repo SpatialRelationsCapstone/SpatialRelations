@@ -1,5 +1,5 @@
-deploy/node_modules
-deploy/dist/vgg16
-deploy/dist/densenet121
-yarn.lock
-yarn-error.log
+yolo_weights/
+keras_yolo3/
+*.ipynb
+.floydexpt
+floyd.yml
