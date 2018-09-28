@@ -13,7 +13,7 @@ class PredicateClassifier(object):
                  learning_rate=0.001,
                  roi_pooling_dim=[4, 4],
                  var_scope="PredicateClassifier",
-                 save_path="/checkpoints/pred_cls.ckpt"):
+                 save_path="output/pred_cls.ckpt"):
         """Set hyperparameters, build graph."""
         self.n_predicates = n_predicates
         self.learning_rate = learning_rate

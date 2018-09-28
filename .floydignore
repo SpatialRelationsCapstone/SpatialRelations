@@ -107,4 +107,4 @@ ENV/
 # mypy
 .mypy_cache/
 
-model_data/sg_dataset/
+yolo_weights/

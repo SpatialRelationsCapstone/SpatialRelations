@@ -14,7 +14,7 @@ DATASET_DIR = "/floyd/input/sg_dataset/"
 
 
 def train_classifier(annotations, detector, classifier,
-                     epochs=20, print_every=1000, save_every=1000,
+                     epochs=5, print_every=1000, save_every=1000,
                      image_dir=DATASET_DIR + "sg_train_images/"):
     """Train predicate classification layer."""
     for epoch in range(epochs):
@@ -61,6 +61,8 @@ def train_classifier(annotations, detector, classifier,
                     classifier.save_model()
 
                 iterations += 1
+
+    classifier.save_model()
 
 
 def _main():
