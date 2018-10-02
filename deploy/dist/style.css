@@ -1,44 +1,212 @@
 :root {
-    --radius: 2.5px;
-    --color: rgb(255, 145, 0);
+    --svg-margin: 15px;
+    --main-color: rgb(251, 255, 0);
+    --highlight-color: rgb(255, 0, 76);
+    --box-radius: 2px;
+    --graph-size: 350px;
+    --black-white-radius: 4px;
+    --backup-font: sans-serif;
+    --heading-font: Raleway;
+    --general-font: Lato;
+    --input-font-size: 14px;
+
+    --sim-body-strength: -250;
+    --sim-link-distance: 100;
+    --sim-radial-distance: 3;
+    
+    --arrow-width: 8px;
+    --arrow-length: 12px;
+    --arrow-offset: 2px;
 }
 
-text {
-    font: 10px sans-serif;
-    pointer-events: none;
-    text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff;
+body {
+    background: rgb(235, 235, 235);
 }
 
-.bbox {
-    fill: var(--color);
-    fill-opacity: .1;
-    stroke: var(--color);
-    stroke-width: 2px;
-    rx: var(--radius);
-    ry: var(--radius);
+#content-container {
+    width: 70%;
+    margin: 30px auto;
+    border: 4px double;
+    background: white;
+    border-radius: var(--black-white-radius);
+    box-shadow: 0 0 10px 2.5px rgb(85, 85, 85);
 }
 
-.connection {
-    stroke-width: 2px;
-    stroke-linecap: round;
-    stroke: var(--color);
+h1, h2 {
+    text-align: center;
+    font-family: var(--heading-font), var(--backup-font);
+    margin: 5px;
+    padding: 0px;
 }
 
-.node circle {
-    r: 5px;
-    fill: var(--color);
+h1 {
+    font-size: 50px;
 }
 
-.link line {
-    stroke: black;
-    stroke-width: 2.5px;
-    stroke-linecap: round;
+h2 {
+    font-size: 40px;
 }
 
-.link polygon {
-    fill: black;
+p {
+    text-align: left;
+    font-family: var(--general-font), var(--backup-font);
+    font-size: 15px;
 }
 
-#image-container img, #image-container svg {
+header, section {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+img {
+    min-width: var(--graph-size);
+    max-width: 90%;
+    max-height: 400px;
+    vertical-align: middle;
+}
+
+textarea {
+    font-family: var(--general-font), var(--backup-font);
+    font-size: var(--input-font-size);
+    resize: none;
+    margin-top: 20px;
+    height: 75px;
+    width: 33%;
+}
+
+button {
+    font-family: var(--general-font), var(--backup-font);
+    font-size: var(--input-font-size);
+    margin: 15px;
+    width: 33%;
+}
+
+.text-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 20px;
+    padding-bottom: 20px;
+    padding-left: 5%;
+    padding-right: 5%;
+
+}
+
+.viz-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+hr {
+    border-top: 2px solid rgb(0, 0, 0);
+    width: 90%;
+    margin: auto;
+}
+
+svg {
     position: absolute;
+}
+
+.box {
+    stroke: black; /*var(--main-color);*/
+    stroke-width: 4px;
+    rx: var(--box-radius);
+    ry: var(--box-radius);
+    fill: var(--highlight-color);
+    fill-opacity: 0;
+}
+
+.box.other {
+    stroke: var(--main-color);
+    stroke-width: 2px;
+}
+
+.box-highlighted {
+    stroke: var(--highlight-color) !important;
+    fill-opacity: .13;
+}
+
+#RL-container img {
+    margin-bottom: calc(var(--graph-size) + var(--svg-margin));
+}
+
+.black-white-outline-rect {
+    fill-opacity: 0;
+    stroke: black;
+    stroke-width: 4px;
+    rx: var(--black-white-radius);
+    ry: var(--black-white-radius);
+}
+
+.black-white-outline-rect.other {
+    fill-opacity: 0;
+    stroke: white;
+    stroke-width: 2px;
+}
+
+.link {
+    fill: none;
+    stroke: rgb(105, 105, 105);
+    stroke-width: 2px;
+}
+
+.link.link-highlight {
+    stroke: black;
+}
+
+.link-node {
+    fill: white;
+    stroke: black;
+    stroke-width: 1px;
+    r: 4px;
+}
+
+.link-node.link-highlight {
+    fill: var(--main-color);
+    r: 6px;
+}
+
+.node {
+    fill: white;
+    stroke: black;
+    stroke-width: 2px;
+    r: 5px;
+}
+
+.node-highlighted {
+    fill: var(--highlight-color);
+    r: 7px;
+}
+
+.graph-node-text {
+    font-family: var(--general-font), var(--backup-font);
+    font-size: 13px;
+    text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+.relation-text {
+    opacity: 1;
+    font-family: var(--general-font), var(--backup-font);
+    font-size: 13px;
+    text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+.circle-select-link {
+    r: 18px;
+    opacity: 0;
+}
+
+.circle-select-node {
+    r: 15px;
+    opacity: 0;
 }
