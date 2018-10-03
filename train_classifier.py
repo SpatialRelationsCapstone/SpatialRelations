@@ -13,6 +13,13 @@ import json
 DATASET_DIR = "/floyd/input/sg_dataset/"
 
 
+def _format_bbox(bbox, scaling_factor):
+    bbox = np.array(bbox)[[0, 2, 1, 3]]
+    bbox = np.expand_dims(bbox, 0)
+    bbox = bbox / scaling_factor
+    return bbox
+
+
 def train_classifier(annotations, detector, classifier,
                      epochs=5, print_every=1000, save_every=1000,
                      image_dir=DATASET_DIR + "sg_train_images/"):
@@ -38,11 +45,11 @@ def train_classifier(annotations, detector, classifier,
             for relation in annotation:
                 target_index = [relation["predicate"]]
 
-                subject_bbox = np.expand_dims(relation["subject"]["bbox"], 0)
-                subject_bbox = subject_bbox / bbox_scaling_factor
+                subject_bbox = relation["subject"]["bbox"]
+                subject_bbox = _format_bbox(subject_bbox, bbox_scaling_factor)
 
-                object_bbox = np.expand_dims(relation["object"]["bbox"], 0)
-                object_bbox = object_bbox / bbox_scaling_factor
+                object_bbox = relation["object"]["bbox"]
+                object_bbox = _format_bbox(object_bbox, bbox_scaling_factor)
 
                 classifier_feed_dict = {
                     classifier.image_feature_map: image_feature_map,

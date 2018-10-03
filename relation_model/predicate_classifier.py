@@ -30,13 +30,17 @@ class PredicateClassifier(object):
         self.saver = tf.train.Saver()
 
         if os.path.isfile(self.save_path + ".index"):
-            self.saver.restore(self.sess, self.save_path)
+            self.load_checkpoint()
         else:
             self.sess.run(tf.global_variables_initializer())
 
     def save_model(self):
         """Write tensorflow ckpt."""
         self.saver.save(self.sess, self.save_path)
+
+    def load_checkpoint(self):
+        """Load tensorflow ckpt."""
+        self.saver.restore(self.sess, self.save_path)
 
     def _build_forward(self):
         # inputs
