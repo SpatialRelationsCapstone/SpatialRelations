@@ -48,6 +48,7 @@ h2 {
 }
 
 p {
+    margin: 13px;
     text-align: left;
     font-family: var(--general-font), var(--backup-font);
     font-size: 15px;
