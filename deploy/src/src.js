@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-const backend_url = "http://127.0.0.1:5000"
+const backend_url = "https://www.floydlabs.com/serve/LeNFXF9ckxUihz8ekJir7H"
 let [resize_timeout_length, resize_timeout] = [66, null];
 const [CNN, RL, GAN] = [
     {},
@@ -13,9 +13,7 @@ const margin = parseFloat(getCSSVariable("--svg-margin"));
 const graph_size = parseFloat(getCSSVariable("--graph-size"));
 
 function startTheThing() {
-    setupCNN();
     setupRL();
-    setupGAN();
     window.addEventListener("resize", () => {
         if (!resize_timeout) {
             resize_timeout = setTimeout(() => {
@@ -28,12 +26,6 @@ function startTheThing() {
     }, false);
 }
 
-function setupCNN() {
-    doCommonStuff(CNN, "CNN");
-    setupSVG(CNN);
-    resizeSVG(CNN);
-}
-
 function setupRL() {
     doCommonStuff(RL, "RL");
     setupSVG(RL);
@@ -42,10 +34,17 @@ function setupRL() {
     processAnnotationsRL(JSON.parse(RL.init_json).relations);
     drawBoxesRL();
     updateGraphNodesAndLinksRL();
-    RL.button.node().onclick = () => makeGetRequest(
-        "/relationships",
-        handleRequestRL
-    );
+    RL.input.node().onchange = (e) => {
+        const reader = new FileReader();
+        reader.onloadend = function() {
+            RL.img.node().src = reader.result;
+        }
+        reader.readAsDataURL(RL.input.node().files[0]);
+        makePostRequest(
+            RL.input.node().files[0],
+            handleRequestRL
+        );
+    }
 }
 
 function setupCanvasesRL() {
@@ -61,7 +60,7 @@ function handleRequestRL(request) {
         drawBoxesRL();
         updateGraphNodesAndLinksRL();
     }
-    RL.img.node().src = backend_url + json_data.image_path;
+
 }
 
 function processAnnotationsRL(relations) {
@@ -307,14 +306,6 @@ function updateGraphViewRL() {
         .attr("transform", d => translate(d.x, d.y));
 }
 
-function setupGAN() {
-    doCommonStuff(GAN, "GAN");
-    setupSVG(GAN);
-    GAN.img.node().onload = () => {
-        resizeSVG(GAN);
-    }
-}
-
 function setupSVG(scope) {
     scope.image_canvas = scope.svg.append("g")
         .attr("transform", translate(margin, margin));
@@ -365,10 +356,10 @@ function doCommonStuff(scope, scope_key) {
     scope.img = scope.container.select("img");
     scope.svg = scope.container.select("svg")
         .attr("transform", translate(0, -margin));
-    scope.button = scope.container.select("button");
+    scope.input = scope.container.select("input");
 }
 
-function makeGetRequest(url, ok_callback) {
+function makePostRequest(file, ok_callback) {
     let request;
     if (window.XMLHttpRequest) {
         request = new XMLHttpRequest();
@@ -378,14 +369,18 @@ function makeGetRequest(url, ok_callback) {
     request.onreadystatechange = e => {
         if (e.target.readyState === 4) {
             if (e.target.status === 200) {
+                console.log(e.target)
                 ok_callback(e.target);
             } else {
                 console.error("Non 200 response recieved:", e.target);
             }
         }
     }
-    request.open('GET', backend_url + url, true);
-    request.send();
+    var formData = new FormData();
+    formData.append("file", file);
+    request.open('POST', backend_url, true);
+    request.setRequestHeader("Content-Type", "multipart/form-data");
+    request.send(formData);
 }
 
 function translate(x, y) {

@@ -7,8 +7,8 @@
     --black-white-radius: 4px;
     --backup-font: sans-serif;
     --heading-font: Raleway;
-    --general-font: Lato;
-    --input-font-size: 14px;
+    --general-font: Roboto;
+    --input-font-size: 13px;
 
     --sim-body-strength: -250;
     --sim-link-distance: 100;
@@ -75,7 +75,7 @@ textarea {
     width: 33%;
 }
 
-button {
+input {
     font-family: var(--general-font), var(--backup-font);
     font-size: var(--input-font-size);
     margin: 15px;
